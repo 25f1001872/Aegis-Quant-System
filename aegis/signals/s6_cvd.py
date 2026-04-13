@@ -579,11 +579,11 @@ class CVDCalculator:
                 "name"        : "Cumulative Volume Delta (CVD)",
                 "family"      : "B",
                 "timeframe"   : "15M",
-                "score"       : 0,
-                "cvd"         : round(self.session_cvd, 2),
+                "s6_score"    : 0,
+                "s6_cvd"      : round(self.session_cvd, 2),
                 "price"       : None,
                 "divergence"  : "warmup",
-                "strength"    : 0.0,
+                "s6_divergence_str" : 0.0,
                 "candles_live": candle_cnt,
                 "warmup_done" : False,
                 "short_window": {},
@@ -614,11 +614,11 @@ class CVDCalculator:
             "name"        : "Cumulative Volume Delta (CVD)",
             "family"      : "B",
             "timeframe"   : "15M",
-            "score"       : mtf["score"],
-            "cvd"         : round(current_cvd, 2),
+            "s6_score"    : mtf["score"],
+            "s6_cvd"      : round(current_cvd, 2),
             "price"       : current_price,
             "divergence"  : mtf["divergence"],
-            "strength"    : mtf["strength"],
+            "s6_divergence_str" : mtf["strength"],
             "candles_live": candle_count,
             "warmup_done" : True,
             "short_window": mtf["short_window"],
@@ -711,12 +711,12 @@ if __name__ == "__main__":
     print("=" * 65)
 
     score_map = {+1: "🟢 BULLISH", -1: "🔴 BEARISH", 0: "⚪ NEUTRAL"}
-    print(f"\n  Final Vote    : {score_map[result['score']]}")
+    print(f"\n  Final Vote    : {score_map[result['s6_score']]}")
     print(f"  Divergence    : {result['divergence']}")
-    print(f"  Strength      : {result['strength']}")
+    print(f"  Strength      : {result['s6_divergence_str']}")
     print(f"  Candles Live  : {result['candles_live']}")
     print(f"  Warmup Done   : {result['warmup_done']}")
-    print(f"  Session CVD   : ${result['cvd']:,.2f}")
-    print(f"  Family B      : 1 point {'awarded' if result['score'] != 0 else 'withheld'}")
+    print(f"  Session CVD   : ${result['s6_cvd']:,.2f}")
+    print(f"  Family B      : 1 point {'awarded' if result['s6_score'] != 0 else 'withheld'}")
 
     stop_cvd_stream()

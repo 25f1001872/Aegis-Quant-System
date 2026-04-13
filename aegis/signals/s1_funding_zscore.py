@@ -304,9 +304,9 @@ def get_signal(symbol: str = "BTCUSDT") -> dict:
             "name"           : "Funding Rate Z-Score",
             "family"         : "A",
             "timeframe"      : "4H",
-            "score"          : 0,
-            "zscore"         : None,
-            "funding_rate"   : round(current_rate, 6),
+            "s1_score"       : score,
+            "s1_zscore"      : round(float(current_z), 4),
+            "s1_funding_raw" : round(float(current_rate), 6),
             "persistence_ok" : False,
             "zscore_pctile"  : None,
             "timestamp"      : timestamp,
@@ -339,9 +339,9 @@ def get_signal(symbol: str = "BTCUSDT") -> dict:
         "name"           : "Funding Rate Z-Score",
         "family"         : "A",
         "timeframe"      : "4H",
-        "score"          : score,
-        "zscore"         : round(float(current_z), 4),
-        "funding_rate"   : round(float(current_rate), 6),
+        "s1_score"       : score,
+        "s1_zscore"      : round(float(current_z), 4),
+        "s1_funding_raw" : round(float(current_rate), 6),
         "persistence_ok" : persistence_ok,
         "zscore_pctile"  : zscore_pctile,
         "timestamp"      : timestamp,
@@ -362,10 +362,10 @@ if __name__ == "__main__":
     print("=" * 65)
 
     score_map = {+1: "🟢 BULLISH", -1: "🔴 BEARISH", 0: "⚪ NEUTRAL"}
-    print(f"\n  Final Vote      : {score_map[result['score']]}")
-    print(f"  Z-Score         : {result['zscore']}")
+    print(f"\n  Final Vote      : {score_map[result['s1_score']]}")
+    print(f"  Z-Score         : {result['s1_zscore']}")
     print(f"  Percentile      : {result['zscore_pctile']}th  "
           f"(current Z is more extreme than {result['zscore_pctile']}% of history)")
     print(f"  Persistence OK  : {result['persistence_ok']}")
     print(f"  Family A        : 1 point "
-          f"{'awarded' if result['score'] != 0 else 'withheld'}")
+          f"{'awarded' if result['s1_score'] != 0 else 'withheld'}")

@@ -1,0 +1,5 @@
+requests
+pandas
+numpy
+websocket-client
+python-dotenv
