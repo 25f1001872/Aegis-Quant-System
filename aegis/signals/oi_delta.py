@@ -28,7 +28,7 @@ from aegis.signals.base import BaseSignal
 warnings.filterwarnings('ignore')
 
 
-class S2OIDeltaSignal(BaseSignal):
+class OIDeltaSignal(BaseSignal):
     """
     Open Interest Delta Signal Calculator
     
@@ -112,7 +112,7 @@ class S2OIDeltaSignal(BaseSignal):
             - oi_delta_score: Numeric score (-1, 0, 1)
         
         Example:
-            >>> signal = S2OIDeltaSignal()
+            >>> signal = OIDeltaSignal()
             >>> df = pd.read_parquet('data.parquet')
             >>> df_with_signals = signal.calculate(df)
             >>> print(df_with_signals[['timestamp', 'oi_delta_signal', 'oi_delta_score']])
@@ -361,7 +361,7 @@ def load_and_calculate_oi_delta(
     df.rename(columns={'sum_open_interest': 'oi_btc'}, inplace=True)
     
     # Calculate signal
-    signal = S2OIDeltaSignal(
+    signal = OIDeltaSignal(
         threshold_up=threshold_up,
         threshold_down=threshold_down,
         use_zscore=use_zscore
