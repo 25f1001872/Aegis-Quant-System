@@ -25,7 +25,7 @@ WINDOW_DAYS  = 7
 SYMBOL       = "BTCUSDT"
 
 # ── Paths ────────────────────────────────────────────────────
-BASE_DIR     = r"C:\Users\HP\Desktop\HighPrep\final_files\history"
+BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "history")
 HISTORY_FILE = os.path.join(BASE_DIR, "signal3_liquidation_history.csv")
 
 # ── ML Feature Selection ─────────────────────────────────────
