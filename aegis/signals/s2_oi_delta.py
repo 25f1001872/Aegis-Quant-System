@@ -190,8 +190,8 @@ class S2OIDeltaSignal(BaseSignal):
             
             # Determine thresholds based on normalization method
             if self.use_zscore:
-                thresh_up = 2.0  # Z-score > 2 is extreme
-                thresh_down = -2.0
+                thresh_up = self.threshold_up
+                thresh_down = self.threshold_down
             else:
                 thresh_up = self.threshold_up
                 thresh_down = self.threshold_down

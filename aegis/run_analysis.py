@@ -2,6 +2,7 @@ import sys
 import os
 import pandas as pd
 from glob import glob
+import yaml
 
 # Add the project's root directory to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -9,8 +10,24 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 # Import from the new standardized signal file
 from aegis.signals.s2_oi_delta import S2OIDeltaSignal
 
+def load_config():
+    """Load configuration from YAML file"""
+    config_path = 'configs/oi_delat_config.yaml'
+    if not os.path.exists(config_path):
+        print(f"⚠️ Config not found at {config_path}, using defaults.")
+        return {}
+    
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
+
 def run_oi_delta_analysis():
     print("🚀 Starting AEGIS OI Delta Batch Analysis...")
+    
+    # Load parameters from config
+    full_config = load_config()
+    params = full_config.get('parameters', {})
+    
+    print(f"📊 Using Parameters: Window={params.get('zscore_window', 30)}, Threshold={params.get('threshold_up', 0.5)}")
     
     # Define paths
     dataset_dir = 'aegis/dataset'
@@ -28,8 +45,13 @@ def run_oi_delta_analysis():
         print("❌ No CSV files found in aegis/dataset/")
         return
 
-    # Initialize Signal
-    signal = S2OIDeltaSignal(use_zscore=True)
+    # Initialize Signal with config parameters
+    signal = S2OIDeltaSignal(
+        threshold_up=params.get('threshold_up', 0.5),
+        threshold_down=params.get('threshold_down', -0.5),
+        use_zscore=params.get('use_zscore', True),
+        zscore_window=params.get('zscore_window', 30)
+    )
     
     for file_path in csv_files:
         file_name = os.path.basename(file_path)

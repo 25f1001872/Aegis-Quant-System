@@ -9,13 +9,13 @@ signal:
   weight: 1.0  # 1/7 in full scoring system
 
 parameters:
-  # Threshold for "significant" OI change
-  threshold_up: 2.0      # OI increase > 2% is significant
-  threshold_down: -2.0   # OI decrease < -2% is significant
+  # Threshold for "significant" OI change (Dead Zone: |Z_OI| < 0.5)
+  threshold_up: 0.5      # Z-score > 0.5 is significant
+  threshold_down: -0.5   # Z-score < -0.5 is significant
   
   # Normalization method
   use_zscore: true       # Recommended: true for adaptive thresholds
-  zscore_window: 360     # 60 days * 6 (4H candles per day)
+  zscore_window: 30      # 5 days * 6 (4H candles per day)
   
   # Alternative: raw percentage thresholds
   # use_zscore: false
