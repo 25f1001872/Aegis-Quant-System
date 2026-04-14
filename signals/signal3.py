@@ -1,3 +1,38 @@
+"""
+import asyncio
+import httpx
+from signal3 import load_history, collect_liquidations, get_signal3
+
+async def main():
+    # Step 1: Load history ONCE at startup
+    load_history()
+
+    # Step 2: Start WebSocket collector as background task
+    asyncio.create_task(collect_liquidations())
+
+    # Step 3: Get your live BTC price (example)
+    async with httpx.AsyncClient() as client:
+        r = await client.get("https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT")
+        current_price = float(r.json()["price"])
+
+    # Step 4: Get signal (call this every 4 hours)
+    result = get_signal3(current_price)
+
+    signal   = result["signal"]    # "BUY" | "SELL" | "HOLD"
+    strength = result["strength"]  # "STRONG" | "MEDIUM" | "WEAK"
+    reason   = result["reason"]
+    features = result["features"]
+
+    print(f"Signal:   {signal}")
+    print(f"Strength: {strength}")
+    print(f"Reason:   {reason}")
+    print(f"Features: {features}")
+
+asyncio.run(main())
+"""
+
+
+
 import asyncio
 import websockets
 import json

@@ -1,3 +1,33 @@
+"""
+import asyncio
+import httpx
+from signal7 import fetch_candles, get_signal7
+
+async def main():
+    async with httpx.AsyncClient() as client:
+        # Step 1: Fetch candles
+        candles = await fetch_candles(client)
+
+        # Step 2: Get signal
+        result = get_signal7(candles)
+
+        # Step 3: Extract what you need
+        signal   = result["signal"]    # "BUY" | "SELL" | "HOLD"
+        strength = result["strength"]  # "STRONG" | "MEDIUM" | "WEAK"
+        reason   = result["reason"]    # human-readable string
+        features = result["features"]  # dict of ML features
+
+        print(f"Signal:   {signal}")
+        print(f"Strength: {strength}")
+        print(f"Reason:   {reason}")
+        print(f"Features: {features}")
+
+asyncio.run(main())
+"""
+
+
+
+
 import asyncio
 import httpx
 from datetime import datetime
