@@ -267,26 +267,6 @@ def get_signal(symbol: str = "BTCUSDT") -> dict:
     Compute Signal 1 — Funding Rate Z-Score (v2.0 optimized).
 
     Only function your aggregator needs to call.
-
-    Returns:
-        {
-            signal_id       : int      → always 1
-            name            : str      → signal name
-            family          : str      → "A"
-            timeframe       : str      → "4H"
-            score           : int      → +1, -1, or 0
-            zscore          : float    → current z-score
-            funding_rate    : float    → latest raw funding rate
-            persistence_ok  : bool     → whether persistence check passed
-            zscore_pctile   : float    → where current Z sits in history (0–100)
-            timestamp       : datetime → time of latest data point
-            reason          : str      → human-readable explanation
-        }
-
-    Usage:
-        from aegis.alpha.funding_zscore import get_signal
-        s1 = get_signal()
-        score = s1["score"]
     """
     df           = fetch_funding_rates(symbol=symbol)
     df["zscore"] = compute_zscore(df)
@@ -299,18 +279,22 @@ def get_signal(symbol: str = "BTCUSDT") -> dict:
 
     # ── Handle insufficient data ──────────────────────────────────────────────
     if pd.isna(current_z):
+        # ── Standardized v1.0 ─────────────────────────────────────────
+        # Keys added   : score, s1_watch_state, s1_z_momentum
+        # Keys renamed : zscore_pctile -> s1_zscore_pctile, persistence_ok -> s1_persistence
+        # Logic changed: NONE
         return {
-            "signal_id"      : 1,
-            "name"           : "Funding Rate Z-Score",
-            "family"         : "A",
-            "timeframe"      : "4H",
-            "s1_score"       : score,
-            "s1_zscore"      : round(float(current_z), 4),
-            "s1_funding_raw" : round(float(current_rate), 6),
-            "persistence_ok" : False,
-            "zscore_pctile"  : None,
-            "timestamp"      : timestamp,
-            "reason"         : "Insufficient data for z-score — defaulting neutral"
+            "signal_id"        : 1,
+            "score"            : 0,
+            "timestamp"        : timestamp,
+            "reason"           : "Insufficient data for z-score — defaulting neutral",
+            "s1_score"         : 0,
+            "s1_zscore"        : 0.0,
+            "s1_funding_raw"   : round(float(current_rate), 6),
+            "s1_zscore_pctile" : 0.0,
+            "s1_persistence"   : 0,
+            "s1_watch_state"   : 0,
+            "s1_z_momentum"    : 0.0,
         }
 
     # ── Percentile rank of current Z in its own history ───────────────────────
@@ -334,18 +318,22 @@ def get_signal(symbol: str = "BTCUSDT") -> dict:
 
     score, reason = _classify(current_z, all_zscores)
 
+    # ── Standardized v1.0 ─────────────────────────────────────────
+    # Keys added   : score, s1_watch_state, s1_z_momentum
+    # Keys renamed : zscore_pctile -> s1_zscore_pctile, persistence_ok -> s1_persistence
+    # Logic changed: NONE
     return {
-        "signal_id"      : 1,
-        "name"           : "Funding Rate Z-Score",
-        "family"         : "A",
-        "timeframe"      : "4H",
-        "s1_score"       : score,
-        "s1_zscore"      : round(float(current_z), 4),
-        "s1_funding_raw" : round(float(current_rate), 6),
-        "persistence_ok" : persistence_ok,
-        "zscore_pctile"  : zscore_pctile,
-        "timestamp"      : timestamp,
-        "reason"         : reason
+        "signal_id"        : 1,
+        "score"            : score,
+        "timestamp"        : timestamp,
+        "reason"           : reason,
+        "s1_score"         : score,
+        "s1_zscore"        : round(float(current_z), 4),
+        "s1_funding_raw"   : round(float(current_rate), 6),
+        "s1_zscore_pctile" : float(zscore_pctile),
+        "s1_persistence"   : int(persistence_ok),
+        "s1_watch_state"   : 0,
+        "s1_z_momentum"    : 0.0,
     }
 
 

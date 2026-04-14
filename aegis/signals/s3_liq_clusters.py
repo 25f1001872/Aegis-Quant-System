@@ -1,4 +1,4 @@
-"""
+r"""
 import asyncio
 import httpx
 from signal3 import load_history, collect_liquidations, get_signal3
@@ -71,6 +71,9 @@ BELOW_TOTAL_MIN         = 1_000_000.0
 IMBALANCE_THRESHOLD     = 0.3
 
 # ── Config ───────────────────────────────────────────────────
+# ── DEV TOGGLE ────────────────────────────────────────────────────
+TEST_MODE      = True                        # set False for production
+WARMUP_SECONDS = 30 if TEST_MODE else 600    # 30s test / 10min prod
 BUCKET_SIZE  = 200
 WINDOW_DAYS  = 7
 SYMBOL       = "BTCUSDT"
@@ -307,3 +310,102 @@ def get_signal3(current_price: float) -> dict:
         "reason":   reason,
         "features": {k: v for k, v in f.items() if FEATURES_TO_USE.get(k)},
     }
+
+
+# ==================== LIVE SIGNAL WRAPPER ====================
+
+def get_signal() -> dict:
+    import requests
+    from datetime import datetime, timezone
+
+    # ── Standardized v1.0 ─────────────────────────────────────────
+    # Keys added   : signal_id, score, timestamp, reason, s3_score, s3_cluster_distance, s3_nearest_cluster_usd, s3_cluster_size_usd, s3_dominant_side
+    # Keys renamed : None (no original get_signal existed)
+    # Logic changed: NONE
+
+    try:
+        r = requests.get(
+            "https://fapi.binance.com/fapi/v1/ticker/price",
+            params={"symbol": "BTCUSDT"}, timeout=10
+        )
+        r.raise_for_status()
+        current_price = float(r.json()["price"])
+
+        # Call existing functions — logic untouched
+        f = _get_features(current_price)
+        result = get_signal3(current_price)
+
+        # Map BUY/SELL/HOLD → +1/-1/0
+        signal_map = {"BUY": +1, "SELL": -1, "HOLD": 0}
+        score = signal_map.get(result["signal"], 0)
+
+        # Derive USD distance with sign from % distance
+        dist_pct = f["s3_nearest_distance"]
+        side     = f["s3_nearest_side"]
+        dist_usd = dist_pct * current_price / 100.0
+
+        # Contract: NEGATIVE = cluster below price, POSITIVE = above
+        if side == -1:
+            s3_cluster_distance = -dist_usd
+            s3_nearest_cluster_usd = current_price - dist_usd
+        elif side == +1:
+            s3_cluster_distance = dist_usd
+            s3_nearest_cluster_usd = current_price + dist_usd
+        else:
+            s3_cluster_distance = 0.0
+            s3_nearest_cluster_usd = 0.0
+
+        # Cluster below price → long liquidations, above → short liquidations
+        if side == -1:
+            s3_dominant_side = "long"
+        elif side == +1:
+            s3_dominant_side = "short"
+        else:
+            s3_dominant_side = ""
+
+    except Exception:
+        score = 0
+        result = {"reason": "Signal error — no liquidation data available"}
+        s3_cluster_distance = 0.0
+        s3_nearest_cluster_usd = 0.0
+        f = {"s3_nearest_size": 0.0}
+        s3_dominant_side = ""
+
+    return {
+        "signal_id"              : 3,
+        "score"                  : score,
+        "timestamp"              : datetime.now(timezone.utc),
+        "reason"                 : result["reason"],
+        "s3_score"               : score,
+        "s3_cluster_distance"    : round(s3_cluster_distance, 2),
+        "s3_nearest_cluster_usd" : round(s3_nearest_cluster_usd, 2),
+        "s3_cluster_size_usd"    : round(f["s3_nearest_size"], 2),
+        "s3_dominant_side"       : s3_dominant_side,
+    }
+
+
+# ==================== MODULE SINGLETON ====================
+import threading
+
+_s3_thread: threading.Thread | None = None
+_s3_loop: asyncio.AbstractEventLoop | None = None
+
+def _run_s3_loop():
+    global _s3_loop
+    _s3_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(_s3_loop)
+    load_history()
+    _s3_loop.run_until_complete(collect_liquidations())
+
+def start_s3_stream():
+    """Start S3 liquidation history loader and websocket in a background thread."""
+    global _s3_thread
+    if _s3_thread is None:
+        _s3_thread = threading.Thread(target=_run_s3_loop, daemon=True)
+        _s3_thread.start()
+
+def stop_s3_stream():
+    """Stop the S3 websocket thread gracefully if possible."""
+    global _s3_loop
+    if _s3_loop and _s3_loop.is_running():
+        _s3_loop.call_soon_threadsafe(_s3_loop.stop)

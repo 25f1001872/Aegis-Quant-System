@@ -100,7 +100,10 @@ import websocket    # pip install websocket-client
 SYMBOL           = "btcusdt"
 WS_URL           = f"wss://fstream.binance.com/ws/{SYMBOL}@aggTrade"
 
-WINDOW_SECONDS   = 15 * 60      # one 15M candle = 900 seconds
+# ── DEV TOGGLE ────────────────────────────────────────────────────
+TEST_MODE      = True                        # set False for production
+WARMUP_SECONDS = 30 if TEST_MODE else 900    # 30s test / 15min prod
+WINDOW_SECONDS = WARMUP_SECONDS              # keeps internals from breaking
 
 HISTORY_WINDOWS  = 96           # how many completed 15M windows to keep in history
                                  # 96 × 15min = 24 hours — enough to capture intraday
@@ -524,6 +527,61 @@ def _fmt_z(z: float | None) -> str:
 
 
 # ──────────────────────────────────────────────────────
+# MODULE-LEVEL SINGLETON (matches S6 pattern)
+# ──────────────────────────────────────────────────────
+
+_collector: OFICollector | None = None
+
+
+def start_ofi_stream() -> OFICollector:
+    """Start OFI WebSocket stream. Call ONCE at system startup."""
+    global _collector
+    _collector = OFICollector()
+    _collector.start()
+    return _collector
+
+
+def get_signal() -> dict:
+    """
+    Contract-compliant wrapper around OFICollector.get_signal5_score().
+    Call start_ofi_stream() first.
+    """
+    global _collector
+    if _collector is None:
+        raise RuntimeError(
+            "OFI stream not started. Call start_ofi_stream() first."
+        )
+
+    result = _collector.get_signal5_score(allowed_direction="ANY")
+
+    score   = result["score"]
+    ofi_raw = result["ofi_raw"] if result["ofi_raw"] is not None else 0.0
+
+    # ── Standardized v1.0 ─────────────────────────────────────────
+    # Keys added   : s5_score, s5_ofi_raw, s5_buy_vol, s5_sell_vol, s5_ofi_norm
+    # Keys renamed : ofi_raw -> s5_ofi_raw
+    # Logic changed: NONE
+    return {
+        "signal_id"        : 5,
+        "score"            : score,
+        "timestamp"        : result["timestamp"],
+        "reason"           : result["reason"],
+        "s5_score"         : score,
+        "s5_ofi_raw"       : round(ofi_raw, 2),
+        "s5_buy_vol"       : 0.0,
+        "s5_sell_vol"      : 0.0,
+        "s5_ofi_norm"      : 0.0,
+    }
+
+
+def stop_ofi_stream() -> None:
+    """Stop WebSocket stream on system shutdown."""
+    global _collector
+    if _collector is not None:
+        _collector.stop()
+
+
+# ──────────────────────────────────────────────────────
 # STANDALONE TEST / DEBUG
 # ──────────────────────────────────────────────────────
 
@@ -536,27 +594,19 @@ if __name__ == "__main__":
     print("Press Ctrl+C to stop.")
     print("=" * 68)
 
-    collector = OFICollector()
-    collector.start()
+    start_ofi_stream()
 
     try:
         while True:
             time.sleep(60)   # print status every minute
-            result = collector.get_signal5_score(allowed_direction="ANY")
+            result = get_signal()
 
             print(f"\n[{result['timestamp']}]")
-            print(f"  OFI Z-score  : {_fmt_z(result['ofi_z']):>8}   (threshold ±{result['z_threshold']})")
-            print(f"  OFI raw      : ${result['ofi_raw']:>12,.0f}"   if result['ofi_raw'] is not None
-                  else "  OFI raw      : (no sealed window yet)")
-            print(f"  OFI live     : ${result['ofi_live']:>12,.0f}   (current open window, partial)")
-            print(f"  History      : {result['history_n']} windows  "
-                  f"|  mean = ${result['history_mean']:,.0f}  "
-                  f"|  std = ${result['history_std']:,.0f}")
-            print(f"  Condition    : {result['condition']}")
             print(f"  Score        : {result['score']:+d}")
-            print(f"  Trigger      : {result['trigger']}")
+            print(f"  OFI raw      : ${result['s5_ofi_raw']:>12,.0f}")
             print(f"  → {result['reason']}")
 
     except KeyboardInterrupt:
-        collector.stop()
+        stop_ofi_stream()
         print("\n[OFI] Exited cleanly.")
+

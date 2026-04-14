@@ -180,6 +180,34 @@ def get_signal4_score(symbol: str = SYMBOL, period: str = PERIOD) -> dict:
     return compute_lsr(record)
 
 
+# ==================== LIVE SIGNAL WRAPPER ====================
+
+def get_signal(symbol: str = SYMBOL, period: str = PERIOD) -> dict:
+    """
+    Contract-compliant wrapper around get_signal4_score().
+    """
+    result = get_signal4_score(symbol=symbol, period=period)
+
+    score    = result["score"]
+    long_pct = result["long_pct"]
+
+    # ── Standardized v1.0 ─────────────────────────────────────────
+    # Keys added   : s4_score, s4_ls_ratio, s4_long_pct, s4_short_pct, s4_ls_extreme
+    # Keys renamed : long_pct -> s4_long_pct, short_pct -> s4_short_pct
+    # Logic changed: NONE
+    return {
+        "signal_id"        : 4,
+        "score"            : score,
+        "timestamp"        : result["timestamp"],
+        "reason"           : result["reason"],
+        "s4_score"         : score,
+        "s4_ls_ratio"      : round(long_pct / 100.0, 6),
+        "s4_long_pct"      : long_pct,
+        "s4_short_pct"     : result["short_pct"],
+        "s4_ls_extreme"    : 1 if (long_pct < LONG_THRESHOLD or long_pct > SHORT_THRESHOLD) else 0,
+    }
+
+
 # ──────────────────────────────────────────────────────
 # STANDALONE TEST / DEBUG
 # ──────────────────────────────────────────────────────
@@ -189,16 +217,16 @@ if __name__ == "__main__":
     print("AEGIS — Signal 4 : Long/Short Ratio  [4H Directional Gate]")
     print("=" * 65)
 
-    result = get_signal4_score()
+    result = get_signal()
 
     print(f"  Timestamp  : {result['timestamp']}")
-    print(f"  Long  %    : {result['long_pct']}%")
-    print(f"  Short %    : {result['short_pct']}%")
-    print(f"  Raw Ratio  : {result['raw_ratio']:.4f}")
-    print(f"  Condition  : {result['condition']}")
-    print(f"  Direction  : {result['direction']}")
+    print(f"  Long  %    : {result['s4_long_pct']}%")
+    print(f"  Short %    : {result['s4_short_pct']}%")
+    print(f"  LS Ratio   : {result['s4_ls_ratio']:.4f}")
+    print(f"  Extreme    : {result['s4_ls_extreme']}")
     print(f"  Score      : {result['score']:+d}")
     print()
     print(f"  Reasoning:")
     print(f"  → {result['reason']}")
     print("=" * 65)
+

@@ -201,3 +201,76 @@ def get_signal7(candles: list) -> dict:
         "reason":   reason,
         "features": {k: v for k, v in f.items() if FEATURES_TO_USE.get(k)},
     }
+
+
+# ==================== LIVE SIGNAL WRAPPER ====================
+
+def get_signal() -> dict:
+    import requests
+    from datetime import datetime, timezone
+
+    # ── Standardized v1.0 ─────────────────────────────────────────
+    # Keys added   : signal_id, score, timestamp, reason, s7_score, s7_taker_ratio, s7_buy_ratio, s7_sell_ratio, s7_ratio_pctile
+    # Keys renamed : None (no original get_signal existed)
+    # Logic changed: NONE
+
+    try:
+        # Synchronous fetch matching the async fetch_candles logic
+        r = requests.get(
+            f"{BASE_URL}/futures/data/takerlongshortRatio",
+            params={"symbol": SYMBOL, "period": PERIOD, "limit": FETCH_LIMIT},
+            timeout=10,
+        )
+        r.raise_for_status()
+
+        candles = []
+        for item in r.json():
+            buy_vol  = float(item["buyVol"])
+            sell_vol = float(item["sellVol"])
+            total    = buy_vol + sell_vol
+            candles.append({
+                "timestamp":   int(item["timestamp"]),
+                "taker_ratio": round(buy_vol / total, 6) if total > 0 else 0.5,
+            })
+        candles.sort(key=lambda x: x["timestamp"])
+
+        if not candles:
+            raise ValueError("No data returned")
+
+        result = get_signal7(candles)
+        
+        signal_map = {"BUY": +1, "SELL": -1, "HOLD": 0}
+        score = signal_map.get(result["signal"], 0)
+        
+        feature_dict = result.get("features", {})
+        taker_ratio = feature_dict.get("s7_ratio", 0.5)
+        
+        # Calculate percentile
+        ratios = [c["taker_ratio"] for c in candles]
+        current = ratios[-1]
+        pctile = sum(rt < current for rt in ratios) / len(ratios) * 100.0 if ratios else 0.0
+
+        return {
+            "signal_id"       : 7,
+            "score"           : score,
+            "timestamp"       : datetime.now(timezone.utc),
+            "reason"          : result["reason"],
+            "s7_score"        : score,
+            "s7_taker_ratio"  : taker_ratio,
+            "s7_buy_ratio"    : taker_ratio,
+            "s7_sell_ratio"   : round(1.0 - taker_ratio, 6),
+            "s7_ratio_pctile" : round(pctile, 2),
+        }
+
+    except Exception as e:
+        return {
+            "signal_id"       : 7,
+            "score"           : 0,
+            "timestamp"       : datetime.now(timezone.utc),
+            "reason"          : f"Signal error: {str(e)}",
+            "s7_score"        : 0,
+            "s7_taker_ratio"  : 0.5,
+            "s7_buy_ratio"    : 0.5,
+            "s7_sell_ratio"   : 0.5,
+            "s7_ratio_pctile" : 0.0,
+        }

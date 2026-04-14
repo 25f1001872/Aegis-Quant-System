@@ -53,7 +53,9 @@ CANDLE_SECONDS      = 300    # 5M candles — optimal microstructure granularity
 MAX_CANDLES         = 48     # 4H rolling window — aligns with Family A thesis
 DIVERGENCE_SHORT    = 5      # Short window: 5 candles = 25 minutes (sensitive)
 DIVERGENCE_LONG     = 10     # Long window:  10 candles = 50 minutes (robust)
-WARMUP_SECONDS      = 3000   # 50 min warmup — 10 candles needed before signal
+# ── DEV TOGGLE ────────────────────────────────────────────────────
+TEST_MODE      = True                        # set False for production
+WARMUP_SECONDS = 60 if TEST_MODE else 3000   # 60s test / 50min prod
 
 # ── Magnitude Filters ─────────────────────────────────────────────────────────
 MIN_PRICE_MOVE_PCT  = 0.15   # Minimum % price move over lookback window
@@ -653,7 +655,26 @@ def get_signal() -> dict:
         raise RuntimeError(
             "CVD stream not started. Call start_cvd_stream() first."
         )
-    return _calculator.get_signal()
+        
+    res = _calculator.get_signal()
+    
+    # ── Standardized v1.0 ─────────────────────────────────────────
+    # Keys added   : score
+    # Keys renamed : divergence -> s6_divergence_type, warmup_done -> s6_warmup_done (int), candles_live -> s6_candles_live
+    # Logic changed: NONE
+    
+    return {
+        "signal_id"          : 6,
+        "score"              : res["s6_score"],
+        "timestamp"          : res["timestamp"],
+        "reason"             : res["reason"],
+        "s6_score"           : res["s6_score"],
+        "s6_cvd"             : res["s6_cvd"],
+        "s6_divergence_str"  : res["s6_divergence_str"],
+        "s6_divergence_type" : res["divergence"],
+        "s6_warmup_done"     : int(res["warmup_done"]),
+        "s6_candles_live"    : res["candles_live"],
+    }
 
 
 def stop_cvd_stream() -> None:

@@ -3,3 +3,5 @@ pandas
 numpy
 websocket-client
 python-dotenv
+httpx
+websockets>=14.0

@@ -391,3 +391,65 @@ def get_oi_delta_columns() -> list:
         'oi_delta_signal',
         'oi_delta_score'
     ]
+
+# ==================== LIVE SIGNAL WRAPPER ====================
+
+def get_signal(symbol: str = "BTCUSDT") -> dict:
+    import requests
+    from datetime import datetime, timezone
+    import pandas as pd
+    
+    # ── Standardized v1.0 ─────────────────────────────────────────
+    # Keys added   : signal_id, score, timestamp, reason, s2_score, s2_oi_delta, s2_oi_current, s2_price_up, s2_oi_up
+    # Keys renamed : None (no original get_signal existed)
+    # Logic changed: NONE
+    
+    try:
+        res = requests.get("https://fapi.binance.com/futures/data/openInterestHist", params={"symbol": symbol, "period": "4h", "limit": 400})
+        res.raise_for_status()
+        oi_data = res.json()
+        
+        df = pd.DataFrame(oi_data)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df['oi_btc'] = df['sumOpenInterest'].astype(float)
+        # Using the same close calculation as load_and_calculate_oi_delta
+        df['close'] = df['sumOpenInterestValue'].astype(float) / df['oi_btc']
+        
+        signal = S2OIDeltaSignal(use_zscore=True, zscore_window=360)
+        df_out = signal.calculate(df)
+        
+        latest = df_out.iloc[-1]
+        
+        score = int(latest.get('oi_delta_score', 0)) if pd.notna(latest.get('oi_delta_score')) else 0
+        signal_cat = latest.get('oi_delta_signal', 'NEUTRAL')
+        reason = signal.get_signal_interpretation(signal_cat)
+        # Assuming timestamp is datetime-like
+        timestamp = latest['timestamp'].isoformat() if pd.notna(latest['timestamp']) else datetime.now(timezone.utc).isoformat()
+        
+        s2_oi_delta = float(latest.get('oi_delta_abs', 0.0)) if pd.notna(latest.get('oi_delta_abs')) else 0.0
+        s2_oi_current = float(latest['sumOpenInterestValue']) if 'sumOpenInterestValue' in latest and pd.notna(latest['sumOpenInterestValue']) else 0.0
+        price_dir = latest.get('price_direction', 'FLAT')
+        s2_price_up = 1 if price_dir == 'UP' else 0
+        s2_oi_up = 1 if s2_oi_delta > 0 else 0
+        
+    except Exception as e:
+        # Safe defaults on failure
+        score = 0
+        timestamp = datetime.now(timezone.utc).isoformat()
+        reason = f"Error computing OI Delta: {str(e)}"
+        s2_oi_delta = 0.0
+        s2_oi_current = 0.0
+        s2_price_up = 0
+        s2_oi_up = 0
+
+    return {
+        "signal_id"        : 2,
+        "score"            : score,
+        "timestamp"        : timestamp,
+        "reason"           : reason,
+        "s2_score"         : score,
+        "s2_oi_delta"      : s2_oi_delta,
+        "s2_oi_current"    : s2_oi_current,
+        "s2_price_up"      : s2_price_up,
+        "s2_oi_up"         : s2_oi_up,
+    }
