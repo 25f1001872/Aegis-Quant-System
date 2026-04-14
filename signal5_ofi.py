@@ -109,7 +109,7 @@ HISTORY_WINDOWS  = 96           # how many completed 15M windows to keep in hist
 MIN_HISTORY      = 1           # minimum completed windows before Z-score is valid
                                  # 12 × 15min = 3 hours of burn-in
 
-Z_STRONG         = 2.0          # |Z| ≥ 2.0 → signal fires (~97.5th percentile)
+Z_STRONG         = 1.0          # |Z| ≥ 2.0 → signal fires (~97.5th percentile)
                                  # matches the Z threshold used by Signal 1 (Funding)
                                  # so both signals are on the same scale
 
