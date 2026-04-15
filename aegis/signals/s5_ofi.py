@@ -101,8 +101,9 @@ SYMBOL           = "btcusdt"
 WS_URL           = f"wss://fstream.binance.com/ws/{SYMBOL}@aggTrade"
 
 # ── DEV TOGGLE ────────────────────────────────────────────────────
-TEST_MODE      = True                        # set False for production
-WARMUP_SECONDS = 30 if TEST_MODE else 900    # 30s test / 15min prod
+TEST_MODE      = False
+WARMUP_SECONDS = 900    # 15 minutes — one full 15M candle window
+                        # must complete before OFI signal is valid
 WINDOW_SECONDS = WARMUP_SECONDS              # keeps internals from breaking
 
 HISTORY_WINDOWS  = 96           # how many completed 15M windows to keep in history
@@ -230,6 +231,10 @@ class OFICollector:
         # ── Live current window ───────────────────────────────────────
         self._live_trades    : deque[_Trade] = deque()
         self._live_ofi       : float         = 0.0   # incremental, O(1) update
+        self._live_buy_vol       : float = 0.0
+        self._live_sell_vol      : float = 0.0
+        self._last_sealed_buy_vol : float = 0.0
+        self._last_sealed_sell_vol: float = 0.0
         self._window_start_ms: int           = 0     # set on first trade
 
         # ── Completed-window history ──────────────────────────────────
@@ -275,8 +280,12 @@ class OFICollector:
                     self._seal_window(self._window_start_ms + self._window_ms)
 
                 # ── Add trade to live current window ──────────────────
-                signed = -qty_usd if is_buyer_maker else +qty_usd
-                self._live_ofi += signed
+                if is_buyer_maker:
+                    self._live_sell_vol += qty_usd
+                    self._live_ofi      -= qty_usd
+                else:
+                    self._live_buy_vol  += qty_usd
+                    self._live_ofi      += qty_usd
                 self._live_trades.append(_Trade(ts_ms, qty_usd, is_buyer_maker))
 
                 # Evict trades that fell outside the current 15M window
@@ -313,7 +322,11 @@ class OFICollector:
         self._last_sealed_ts  = ts_utc
 
         # Reset live window
+        self._last_sealed_buy_vol  = self._live_buy_vol
+        self._last_sealed_sell_vol = self._live_sell_vol
         self._live_ofi        = 0.0
+        self._live_buy_vol  = 0.0
+        self._live_sell_vol = 0.0
         self._live_trades.clear()
         self._window_start_ms = new_start_ms
 
@@ -542,35 +555,33 @@ def start_ofi_stream() -> OFICollector:
 
 
 def get_signal() -> dict:
-    """
-    Contract-compliant wrapper around OFICollector.get_signal5_score().
-    Call start_ofi_stream() first.
-    """
     global _collector
     if _collector is None:
         raise RuntimeError(
             "OFI stream not started. Call start_ofi_stream() first."
         )
 
-    result = _collector.get_signal5_score(allowed_direction="ANY")
-
+    result  = _collector.get_signal5_score(allowed_direction="ANY")
     score   = result["score"]
     ofi_raw = result["ofi_raw"] if result["ofi_raw"] is not None else 0.0
 
-    # ── Standardized v1.0 ─────────────────────────────────────────
-    # Keys added   : s5_score, s5_ofi_raw, s5_buy_vol, s5_sell_vol, s5_ofi_norm
-    # Keys renamed : ofi_raw -> s5_ofi_raw
-    # Logic changed: NONE
+    with _collector._lock:
+        buy_vol  = _collector._last_sealed_buy_vol
+        sell_vol = _collector._last_sealed_sell_vol
+
+    total_vol = buy_vol + sell_vol
+    ofi_norm  = round(ofi_raw / total_vol, 6) if total_vol > 0 else 0.0
+
     return {
-        "signal_id"        : 5,
-        "score"            : score,
-        "timestamp"        : result["timestamp"],
-        "reason"           : result["reason"],
-        "s5_score"         : score,
-        "s5_ofi_raw"       : round(ofi_raw, 2),
-        "s5_buy_vol"       : 0.0,
-        "s5_sell_vol"      : 0.0,
-        "s5_ofi_norm"      : 0.0,
+        "signal_id"  : 5,
+        "score"      : score,
+        "timestamp"  : result["timestamp"],
+        "reason"     : result["reason"],
+        "s5_score"   : score,
+        "s5_ofi_raw" : round(ofi_raw, 2),
+        "s5_buy_vol" : round(buy_vol, 2),
+        "s5_sell_vol": round(sell_vol, 2),
+        "s5_ofi_norm": ofi_norm,
     }
 
 

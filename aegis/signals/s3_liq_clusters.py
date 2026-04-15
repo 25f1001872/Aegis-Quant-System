@@ -72,8 +72,10 @@ IMBALANCE_THRESHOLD     = 0.3
 
 # ── Config ───────────────────────────────────────────────────
 # ── DEV TOGGLE ────────────────────────────────────────────────────
-TEST_MODE      = True                        # set False for production
-WARMUP_SECONDS = 30 if TEST_MODE else 600    # 30s test / 10min prod
+TEST_MODE      = False
+WARMUP_SECONDS = 600    # 10 minutes — enough to build initial
+                        # liquidation cluster map from WebSocket
+                        # stream before first signal read
 BUCKET_SIZE  = 200
 WINDOW_DAYS  = 7
 SYMBOL       = "BTCUSDT"

@@ -54,8 +54,10 @@ MAX_CANDLES         = 48     # 4H rolling window — aligns with Family A thesis
 DIVERGENCE_SHORT    = 5      # Short window: 5 candles = 25 minutes (sensitive)
 DIVERGENCE_LONG     = 10     # Long window:  10 candles = 50 minutes (robust)
 # ── DEV TOGGLE ────────────────────────────────────────────────────
-TEST_MODE      = True                        # set False for production
-WARMUP_SECONDS = 60 if TEST_MODE else 3000   # 60s test / 50min prod
+TEST_MODE      = False
+WARMUP_SECONDS = 3000   # 50 minutes — needs 10 closed 5M candles
+                        # to populate both sides of divergence
+                        # lookback before first signal is valid
 
 # ── Magnitude Filters ─────────────────────────────────────────────────────────
 MIN_PRICE_MOVE_PCT  = 0.15   # Minimum % price move over lookback window

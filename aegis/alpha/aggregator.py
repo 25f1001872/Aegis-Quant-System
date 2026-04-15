@@ -35,6 +35,33 @@ class AegisAggregator:
     def __init__(self, mode="LIVE"):
         self.mode = mode
         self.csv_path = os.path.join("data", "processed", "aegis_features.csv")
+        self.signal_cache = {}
+        self.last_update = {}
+
+        # ── TTL Cache ──────────────────────────────────────────────────
+        # Signals are cached for exactly as long as their underlying
+        # Binance data source actually updates. Fetching more often
+        # than the source updates returns identical data — wasted call.
+        #
+        # S1 Funding     → 28,800s (8H)  — Binance settles every 8H
+        # S2 OI Delta    → 300s    (5M)  — Binance OI hist updates every 5M
+        # S3 Clusters    → 1,800s  (30M) — cluster map changes slowly
+        # S4 LSR         → 300s    (5M)  — Binance LSR updates every 5M
+        # S7 Taker Ratio → 300s    (5M)  — Binance taker ratio every 5M
+        # OHLCV          → 300s    (5M)  — new candle closes every 5M
+        # S5 OFI         → no cache — live WebSocket trigger signal
+        # S6 CVD         → no cache — live WebSocket trigger signal
+
+        self._cache = {}
+
+        self._ttl = {
+            "s1"   : 28_800,
+            "s2"   : 300,
+            "s3"   : 1_800,
+            "s4"   : 300,
+            "s7"   : 300,
+            "ohlcv": 300,
+        }
         if self.mode == "COLLECT":
             os.makedirs(os.path.dirname(self.csv_path), exist_ok=True)
             self._ensure_csv_header()
@@ -85,6 +112,44 @@ class AegisAggregator:
         except Exception as e:
             logger.error(f"Signal {signal_id} failed: {str(e)}")
             return self._get_neutral_fallback(signal_id)
+
+    def _fetch_with_cache(self, key: str, func, signal_id: int) -> dict:
+        """
+        Return cached result if TTL has not expired.
+        Otherwise fetch fresh data, cache it, and return it.
+
+        Args:
+            key       : cache key — "s1","s2","s3","s4","s7","ohlcv"
+            func      : callable to fetch fresh data — pass None for ohlcv
+            signal_id : int signal id for _safe_call (pass 0 for ohlcv)
+
+        Returns:
+            signal dict or ohlcv feature dict
+        """
+        now = time.time()
+        ttl = self._ttl.get(key, 0)
+
+        if key in self._cache:
+            age = now - self._cache[key]["ts"]
+            if age < ttl:
+                logger.info(
+                    f"Cache HIT  [{key}] — age {age:.0f}s / ttl {ttl}s"
+                )
+                return self._cache[key]["data"]
+            logger.info(
+                f"Cache MISS [{key}] — age {age:.0f}s exceeded ttl {ttl}s"
+                f" — fetching fresh"
+            )
+        else:
+            logger.info(f"Cache COLD [{key}] — first fetch")
+
+        if signal_id == 0:
+            fresh = self._compute_ohlcv_features()
+        else:
+            fresh = self._safe_call(func, signal_id)
+
+        self._cache[key] = {"data": fresh, "ts": now}
+        return fresh
 
     def _compute_ohlcv_features(self):
         try:
@@ -195,25 +260,23 @@ class AegisAggregator:
     def aggregate(self):
         import concurrent.futures
 
-        # Gather Signals and OHLCV concurrently
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-            fut_s1 = executor.submit(self._safe_call, get_s1, 1)
-            fut_s2 = executor.submit(self._safe_call, get_s2, 2)
-            fut_s3 = executor.submit(self._safe_call, get_s3, 3)
-            fut_s4 = executor.submit(self._safe_call, get_s4, 4)
+        # ── Cached REST signals ────────────────────────────────────────────
+        # Cache hits are instant — only fetches when TTL has expired
+        s1    = self._fetch_with_cache("s1",    get_s1, 1)
+        s2    = self._fetch_with_cache("s2",    get_s2, 2)
+        s4    = self._fetch_with_cache("s4",    get_s4, 4)
+        s7    = self._fetch_with_cache("s7",    get_s7, 7)
+        ohlcv = self._fetch_with_cache("ohlcv", None,   0)
+
+        # ── Live signals — always fresh, run in parallel ───────────────────
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            fut_s3 = executor.submit(self._fetch_with_cache, "s3", get_s3, 3)
             fut_s5 = executor.submit(self._safe_call, get_s5, 5)
             fut_s6 = executor.submit(self._safe_call, get_s6, 6)
-            fut_s7 = executor.submit(self._safe_call, get_s7, 7)
-            fut_ohlcv = executor.submit(self._compute_ohlcv_features)
 
-            s1 = fut_s1.result()
-            s2 = fut_s2.result()
             s3 = fut_s3.result()
-            s4 = fut_s4.result()
             s5 = fut_s5.result()
             s6 = fut_s6.result()
-            s7 = fut_s7.result()
-            ohlcv = fut_ohlcv.result()
 
         # Build feature row dictionary
         now = datetime.now(timezone.utc)
@@ -281,51 +344,86 @@ class AegisAggregator:
         return row
 
 def main():
-    # ── DEV TOGGLE ────────────────────────────────────────────────
-    TEST_MODE = True      # set False for production
-
     print("Starting Streaming Signals (S3, S5, S6)...")
     start_s3_stream()
     start_ofi_stream()
     start_cvd_stream()
 
-    # Warmup duration matches the longest WebSocket signal warmup
-    # TEST_MODE:  60 seconds  (matches S6 test WARMUP_SECONDS = 60)
-    # PRODUCTION: 3000 seconds (matches S6 prod WARMUP_SECONDS = 3000)
-    WARMUP = 60 if TEST_MODE else 3000
+    # ── Warmup ────────────────────────────────────────────────────────────
+    # Wait for the longest WebSocket signal warmup to complete.
+    # S6 CVD needs 3000s (50 min) — this is the bottleneck.
+    # S3 needs 600s and S5 needs 900s — both finish inside S6 warmup.
+    # No point collecting rows before all 3 streams are ready.
+    WARMUP = 3000   # seconds — matches S6 WARMUP_SECONDS exactly
 
-    print(f"{'[TEST MODE] ' if TEST_MODE else ''}Warming up — {WARMUP}s...")
+    print(f"Warming up WebSocket streams — {WARMUP // 60} minutes...")
+    print("S3 / S5 / S6 collecting data in background...")
+    print("REST signals S1 S2 S4 S7 need no warmup — ready immediately\n")
 
-    for i in range(WARMUP):
-        time.sleep(1)
-        filled = int((i + 1) / WARMUP * 40)
-        bar    = "█" * filled + "░" * (40 - filled)
-        print(f"\r  [{bar}] {i+1}/{WARMUP}s", end="", flush=True)
+    for minute in range(WARMUP // 60):
+        time.sleep(60)
+        done      = minute + 1
+        remaining = (WARMUP // 60) - done
+        print(f"  Warmup: {done} min done — {remaining} min remaining...")
 
-    print("\n\nWarmup complete — starting collection\n")
+    print("\nWarmup complete — starting collection loop\n")
 
     agg = AegisAggregator(mode="COLLECT")
+    print(f"Saving to: {agg.csv_path}")
 
-    # Collection interval
-    # TEST_MODE:  every 30 seconds so you see multiple rows fast
-    # PRODUCTION: every 15 minutes (900 seconds)
-    INTERVAL = 30 if TEST_MODE else 900
+    import yaml
+    config = {}
+    try:
+        with open("configs/risk.yaml", "r") as f:
+            config = yaml.safe_load(f) or {}
+    except Exception:
+        pass
 
-    print(f"Interval: {INTERVAL}s | Saving to {agg.csv_path}")
+    from aegis.execution.broker import BinanceBroker, SYMBOL, LEVERAGE
+    from aegis.execution.paper import PaperTradeEngine
+    from aegis.portfolio.constructor import PortfolioManager
+
+    broker  = BinanceBroker()
+    paper   = PaperTradeEngine()
+    manager = PortfolioManager(broker, paper, config=config)
+    broker.set_leverage(SYMBOL, LEVERAGE)
+
+    # ── Master loop interval ───────────────────────────────────────────────
+    # 5 minutes matches the fastest REST signal update frequency
+    # (S2 OI, S4 LSR, S7 Taker Ratio, OHLCV all update every 5M on Binance)
+    #
+    # Latency buffer: sleep 310s not 300s
+    # Exact 300s risks landing on the same candle boundary as Binance
+    # which can cause the REST call to fetch the previous candle value
+    # instead of the newly closed one (off-by-one candle bug).
+    # 10 second buffer ensures Binance has fully settled the new candle
+    # before we fetch it. Small cost — large reliability gain.
+    INTERVAL = 310  # 5 minutes + 10 second latency buffer
+
+    print(f"Collection interval: {INTERVAL}s (5min + 10s latency buffer)")
     print("Ctrl+C to stop\n")
 
     try:
         while True:
-            agg.aggregate()
+            feature_row = agg.aggregate()
+            result      = manager.process(feature_row)
+            print(
+                f"  Action:{result['action']:<6} "
+                f"Dir:{str(result['direction']):<5} "
+                f"Score:{result['total_score']:+d} "
+                f"B:{result['family_b_score']:+d} "
+                f"Bulls:{result['bull_votes']} Bears:{result['bear_votes']} "
+                f"→ {result['reason']}"
+            )
             time.sleep(INTERVAL)
-            
+
     except KeyboardInterrupt:
-        print("\nShutting down streaming signals...")
+        print("\nShutting down...")
     finally:
         stop_s3_stream()
         stop_ofi_stream()
         stop_cvd_stream()
-        print("Exit.")
+        print("Done.")
 
 if __name__ == "__main__":
     main()
