@@ -6,3 +6,5 @@ python-dotenv
 httpx
 websockets>=14.0
 pytest
+PyYAML
+pytest-asyncio
