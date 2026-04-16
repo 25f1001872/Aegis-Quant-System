@@ -1,6 +1,5 @@
 # Open Interest Delta Signal - Integration Guide
 
-**Component Owner:** [Your Name]  
 **Signal:** #2 (Family A - Derivatives)  
 **Status:** ✅ Ready for Integration
 
