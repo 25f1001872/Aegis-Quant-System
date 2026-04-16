@@ -2,6 +2,10 @@
 Portfolio manager for Aegis-Quant-System
 """
 
+# Production TP Ladder — R-multiple optimized
+# 30/30/40 distribution
+# Designed for fat-tail crypto expansion
+
 # ── DEMO MODE ─────────────────────────────────────────────────────
 # True  → forces a trade entry on raw value lean alone
 #          used for demonstration only — bypasses score thresholds
@@ -40,12 +44,6 @@ class PortfolioManager:
         if self.paper_engine.get_drawdown() > 8.0:
             return False
             
-        hour = feature_row.get("hour_of_day", 0)
-        if hour in {0, 1, 2, 3, 4}:
-            return False
-            
-        if feature_row.get("regime", 0) == 2:
-            return False
             
         if not DEMO_MODE:
             if feature_row.get("family_b_score", 0) == 0:
@@ -117,40 +115,36 @@ class PortfolioManager:
         s3_dominant_side = feature_row.get("s3_dominant_side", "")
 
         if direction == "LONG":
-            cluster_price = s3_nearest_cluster_usd if (s3_dominant_side == "short" and s3_nearest_cluster_usd > current_price) else 0.0
             entry = current_price
-            
-            if cluster_price > 0:
-                tp1 = cluster_price * (1 - 0.002)
-                tp2 = cluster_price * 1.005
-            else:
-                tp1 = entry * 1.01
-                tp2 = entry * 1.02
-
             try:
                 swing = self.broker.get_last_4h_swing("LONG")
             except Exception:
                 return None
-                
             sl = swing * (1 - 0.001)
+            
+            # Compute R (Risk Unit)
+            R = abs(entry - sl)
+            
+            # R-Multiple TP Ladder
+            tp1 = entry + (1.2 * R)
+            tp2 = entry + (2.0 * R)
+            tp3 = entry + (3.5 * R)
 
         elif direction == "SHORT":
-            cluster_price = s3_nearest_cluster_usd if (s3_dominant_side == "long" and s3_nearest_cluster_usd > 0 and s3_nearest_cluster_usd < current_price) else 0.0
             entry = current_price
-            
-            if cluster_price > 0:
-                tp1 = cluster_price * (1 + 0.002)
-                tp2 = cluster_price * 0.995
-            else:
-                tp1 = entry * 0.99
-                tp2 = entry * 0.98
-
             try:
                 swing = self.broker.get_last_4h_swing("SHORT")
             except Exception:
                 return None
-                
             sl = swing * (1 + 0.001)
+
+            # Compute R (Risk Unit)
+            R = abs(entry - sl)
+
+            # R-Multiple TP Ladder
+            tp1 = entry - (1.2 * R)
+            tp2 = entry - (2.0 * R)
+            tp3 = entry - (3.5 * R)
         else:
             return None
 
@@ -162,50 +156,72 @@ class PortfolioManager:
             "entry": round(entry, 2),
             "sl": round(sl, 2),
             "tp1": round(tp1, 2),
-            "tp2": round(tp2, 2)
+            "tp2": round(tp2, 2),
+            "tp3": round(tp3, 2),
+            "R": round(R, 2)
         }
 
-    def compute_size(self, direction: str, entry: float, feature_row: dict) -> float:
-        balance = self.paper_engine.get_balance()
-        if DEMO_MODE:
-            # In demo mode always use 15% of max position
-            # Small size — this is a demonstration not a real trade
-            max_position  = balance * 0.20
-            position_usdt = max_position * 0.15
-            quantity      = round(position_usdt / entry, 3)
-            quantity      = max(quantity, 0.001)
-            return quantity
-
-        family_b = abs(feature_row.get("family_b_score", 0))
-        total_score = abs(feature_row.get("total_score", 0))
-
-        if family_b == 0:
-            size_pct = 0.0
-        elif family_b == 1 and total_score == 1:
-            size_pct = 0.15
-        elif family_b >= 1 and total_score == 2:
-            size_pct = 0.25
-        elif family_b >= 2 and total_score == 3:
-            size_pct = 0.50
-        elif family_b >= 2 and total_score == 4:
-            size_pct = 0.75
-        elif family_b == 3 and total_score >= 5:
-            size_pct = 1.00
+    def compute_size(self, direction: str, entry: float, feature_row: dict) -> tuple[float, float]:
+        stats = self.paper_engine.get_risk_stats()
+        
+        # Factor 1: Quarter-Kelly Sizing
+        # formula: K% = W - (1-W)/R
+        w = stats["win_rate"]
+        r = stats["payoff_ratio"]
+        kelly_full = max(0, w - (1 - w) / r) if r > 0 else 0
+        kelly_factor = max(0.5, kelly_full * 0.25) # Floor at 0.5 to stay in game
+        
+        # Factor 2: Equity Curve Scaling (20-EMA Filter)
+        equity_ema = stats["equity_ema_20"]
+        current_equity = stats["current_equity"]
+        equity_factor = 1.0 if current_equity >= equity_ema else 0.5
+        
+        # Factor 3: Drawdown Throttle (Threshold: 5%)
+        # Linear reduction from 1.0 to 0.2 as DD goes 5% -> 20%
+        dd = stats["max_drawdown_fraction"]
+        if dd <= 0.05:
+            dd_factor = 1.0
         else:
-            size_pct = 0.15
+            dd_factor = max(0.2, 1.0 - ((dd - 0.05) / 0.15))
 
-        if size_pct == 0:
-            return 0.0
+        # Factor 4: Volatility Scaling (ATR Adjusted)
+        # Scale size inversely to relative volatility
+        # BTC baseline ATR logic
+        current_atr = feature_row.get("atr_15m", 0)
+        avg_atr = feature_row.get("volatility_15m", current_atr) # Use volatility field as proxy for mean
+        if current_atr > 0 and avg_atr > 0:
+            vol_factor = avg_atr / current_atr
+            vol_factor = max(0.4, min(1.3, vol_factor)) # Clamp to avoid extreme swings
+        else:
+            vol_factor = 1.0
 
-        balance = self.paper_engine.get_balance()
-        max_position = balance * self.max_position_pct
-        position_usdt = max_position * size_pct
-        quantity = round(position_usdt / entry, 3)
+        # Composite Risk Multiplier
+        risk_multiplier = kelly_factor * equity_factor * dd_factor * vol_factor
+        risk_multiplier = max(0.1, min(1.5, risk_multiplier)) # Safe Floor 10%
+        
+        # Base Sizing
+        if DEMO_MODE:
+            max_position = stats["current_equity"] * 0.20
+            base_size_multiplier = 0.15
+        else:
+            family_b = abs(feature_row.get("family_b_score", 0))
+            total_score = abs(feature_row.get("total_score", 0))
+            
+            if family_b >= 3 and total_score >= 5: base_size_multiplier = 1.0
+            elif family_b >= 2 and total_score >= 4: base_size_multiplier = 0.75
+            elif family_b >= 2 and total_score >= 3: base_size_multiplier = 0.50
+            elif family_b >= 1 and total_score >= 2: base_size_multiplier = 0.25
+            else: base_size_multiplier = 0.15
+            
+            max_position = stats["current_equity"] * self.max_position_pct
+
+        final_pos_usdt = max_position * base_size_multiplier * risk_multiplier
+        quantity = round(final_pos_usdt / entry, 3)
         
         if quantity < 0.001:
-            return 0.0
+            return 0.0, risk_multiplier
             
-        return quantity
+        return quantity, risk_multiplier
 
     def process(self, feature_row: dict) -> dict:
         action = "SKIP"
@@ -215,19 +231,57 @@ class PortfolioManager:
         quantity = None
         sl = None
         tp1 = None
+        risk_factor = 1.0
         
         # Step 7 — Update open position
         try:
             current_price = self.broker.get_current_price()
-            events = self.paper_engine.update(current_price)
+            events = self.paper_engine.update(
+                current_price=current_price,
+                candle_high=feature_row.get("candle_high", current_price),
+                candle_low=feature_row.get("candle_low", current_price)
+            )
             for event in events:
                 portfolio_logger.info(event)
         except Exception as e:
             portfolio_logger.error(f"Failed to fetch price for update: {e}")
             current_price = 0.0
 
-        # Step 8 — Thesis invalidation check
+        # Build shared state for UI/aggregator
         pos = self.paper_engine.get_position()
+        if pos:
+            pnl_pct = (current_price - pos['entry_price'])/pos['entry_price']*100 if pos['side']=='LONG' else (pos['entry_price']-current_price)/pos['entry_price']*100
+            result = {
+                "action": "HOLD",
+                "direction": pos["side"],
+                "total_score": feature_row.get("total_score", 0),
+                "family_b_score": feature_row.get("family_b_score", 0),
+                "bull_votes": feature_row.get("bull_votes", 0),
+                "bear_votes": feature_row.get("bear_votes", 0),
+                "reason": f"Holding {pos['side']} | Entry:{pos['entry_price']} | SL:{pos['sl_price']} | TP1:{pos['tp1_price']}({'✔' if pos['tp1_hit'] else ' '}) | TP2:{pos['tp2_price']}({'✔' if pos['tp2_hit'] else ' '}) | TP3:{pos['tp3_price']}({'✔' if pos['tp3_hit'] else ' '}) | Current:{current_price} | PnL:{pnl_pct:.3f}%",
+                "tp1_price": pos["tp1_price"],
+                "tp2_price": pos["tp2_price"],
+                "tp3_price": pos["tp3_price"],
+                "tp1_hit": pos["tp1_hit"],
+                "tp2_hit": pos["tp2_hit"],
+                "tp3_hit": pos["tp3_hit"],
+                "sl_price": pos["sl_price"],
+                "risk_factor": 1.0 # Holder
+            }
+        else:
+            result = {
+                "action": action,
+                "direction": direction,
+                "total_score": feature_row.get("total_score", 0),
+                "family_b_score": feature_row.get("family_b_score", 0),
+                "bull_votes": feature_row.get("bull_votes", 0),
+                "bear_votes": feature_row.get("bear_votes", 0),
+                "reason": reason,
+                "tp1_hit": False,
+                "tp2_hit": False,
+                "tp3_hit": False,
+                "risk_factor": 1.0
+            }
         if pos and current_price > 0:
             s2_oi_current = feature_row.get("s2_oi_current", 0.0)
             s2_oi_delta = feature_row.get("s2_oi_delta", 0.0)
@@ -297,10 +351,11 @@ class PortfolioManager:
                         sl = levels["sl"]
                         tp1 = levels["tp1"]
                         tp2 = levels["tp2"]
+                        tp3 = levels["tp3"]
                         
-                        quantity = self.compute_size(direction, entry, feature_row)
+                        quantity, risk_factor = self.compute_size(direction, entry, feature_row)
                         if quantity == 0:
-                            reason = "Position size calculated as 0 or < 0.001"
+                            reason = f"Position size calculated as 0 (Risk Factor: {risk_factor:.2x})"
                         else:
                             # Step 6 — Execute
                             self.paper_engine.open_position(
@@ -310,10 +365,13 @@ class PortfolioManager:
                                 sl=sl,
                                 tp1=tp1,
                                 tp2=tp2,
+                                tp3=tp3,
+                                r_unit=levels["R"],
                                 score=feature_row.get("total_score", 0),
                                 signal_snapshot=feature_row
                             )
                             
+                            side = "BUY" if direction == "LONG" else "SELL"
                             opposite_side = "SELL" if direction == "LONG" else "BUY"
                             
                             is_paper = True
@@ -324,9 +382,10 @@ class PortfolioManager:
                                 pass
                                 
                             if not is_paper:
-                                self.broker.place_market_order(direction, quantity)
-                                self.broker.place_stop_order(opposite_side, quantity, sl)
-                                self.broker.place_limit_order(opposite_side, quantity*0.7, tp1)
+                                # Entry order only — Testnet does not support STOP orders
+                                # SL and TP will be handled internally by PaperTradeEngine.update().
+                                # Internal SL/TP management — NOT SAFE FOR LIVE MONEY
+                                self.broker.place_market_order(side, quantity)
 
                             action = "OPEN"
                             reason = f"Entered {direction} at {entry}"
@@ -346,5 +405,6 @@ class PortfolioManager:
             "sl_price": sl,
             "tp1_price": tp1,
             "quantity": quantity,
+            "risk_factor": risk_factor,
             "reason": reason
         }

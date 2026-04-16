@@ -592,32 +592,5 @@ def stop_ofi_stream() -> None:
         _collector.stop()
 
 
-# ──────────────────────────────────────────────────────
-# STANDALONE TEST / DEBUG
-# ──────────────────────────────────────────────────────
 
-if __name__ == "__main__":
-    print("=" * 68)
-    print("AEGIS — Signal 5 : OFI Z-Score  [15M Entry Trigger]")
-    print(f"Z threshold : ±{Z_STRONG}  |  History : {HISTORY_WINDOWS} windows ({HISTORY_WINDOWS * 15} min)")
-    print(f"Burn-in     : {MIN_HISTORY} windows ({MIN_HISTORY * 15} min) before Z-score is valid")
-    print("Running in standalone mode — direction gate = ANY")
-    print("Press Ctrl+C to stop.")
-    print("=" * 68)
-
-    start_ofi_stream()
-
-    try:
-        while True:
-            time.sleep(60)   # print status every minute
-            result = get_signal()
-
-            print(f"\n[{result['timestamp']}]")
-            print(f"  Score        : {result['score']:+d}")
-            print(f"  OFI raw      : ${result['s5_ofi_raw']:>12,.0f}")
-            print(f"  → {result['reason']}")
-
-    except KeyboardInterrupt:
-        stop_ofi_stream()
-        print("\n[OFI] Exited cleanly.")
 

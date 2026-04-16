@@ -1,47 +1,8 @@
-"""
-import asyncio
-import httpx
-from signal7 import fetch_candles, get_signal7
-
-async def main():
-    async with httpx.AsyncClient() as client:
-        # Step 1: Fetch candles
-        candles = await fetch_candles(client)
-
-        # Step 2: Get signal
-        result = get_signal7(candles)
-
-        # Step 3: Extract what you need
-        signal   = result["signal"]    # "BUY" | "SELL" | "HOLD"
-        strength = result["strength"]  # "STRONG" | "MEDIUM" | "WEAK"
-        reason   = result["reason"]    # human-readable string
-        features = result["features"]  # dict of ML features
-
-        print(f"Signal:   {signal}")
-        print(f"Strength: {strength}")
-        print(f"Reason:   {reason}")
-        print(f"Features: {features}")
-
-asyncio.run(main())
-"""
-"""
-{
-    "signal":   "BUY" | "SELL" | "HOLD",
-    "strength": "STRONG" | "MEDIUM" | "WEAK",
-    "reason":   "Taker ratio 0.612 buyers dominating. Change=+0.032 Mom=+0.015 Z=+1.82",
-    "features": {
-        "s7_ratio":        0.612,   # current taker buy ratio (0 to 1)
-        "s7_ratio_change": 0.032,   # change from previous candle
-        "s7_momentum":     0.015,   # avg change over last 3 candles
-        "s7_extreme_flag": +1,      # +1 = bullish, -1 = bearish, 0 = neutral
-        "s7_zscore":       1.82,    # how far ratio is from 50-candle mean
-    }
-}
-"""
 
 import asyncio
 import httpx
-from datetime import datetime
+import requests
+from datetime import datetime, timezone
 
 # ============================================================
 # SIGNAL 7 — Taker Buy/Sell Volume Ratio (Family B | 15M)
@@ -203,12 +164,7 @@ def get_signal7(candles: list) -> dict:
     }
 
 
-# ==================== LIVE SIGNAL WRAPPER ====================
-
 def get_signal() -> dict:
-    import requests
-    from datetime import datetime, timezone
-
     # ── Standardized v1.0 ─────────────────────────────────────────
     # Keys added   : signal_id, score, timestamp, reason, s7_score, s7_taker_ratio, s7_buy_ratio, s7_sell_ratio, s7_ratio_pctile
     # Keys renamed : None (no original get_signal existed)

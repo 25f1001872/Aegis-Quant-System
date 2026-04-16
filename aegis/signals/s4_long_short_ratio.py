@@ -208,25 +208,5 @@ def get_signal(symbol: str = SYMBOL, period: str = PERIOD) -> dict:
     }
 
 
-# ──────────────────────────────────────────────────────
-# STANDALONE TEST / DEBUG
-# ──────────────────────────────────────────────────────
 
-if __name__ == "__main__":
-    print("=" * 65)
-    print("AEGIS — Signal 4 : Long/Short Ratio  [4H Directional Gate]")
-    print("=" * 65)
-
-    result = get_signal()
-
-    print(f"  Timestamp  : {result['timestamp']}")
-    print(f"  Long  %    : {result['s4_long_pct']}%")
-    print(f"  Short %    : {result['s4_short_pct']}%")
-    print(f"  LS Ratio   : {result['s4_ls_ratio']:.4f}")
-    print(f"  Extreme    : {result['s4_ls_extreme']}")
-    print(f"  Score      : {result['score']:+d}")
-    print()
-    print(f"  Reasoning:")
-    print(f"  → {result['reason']}")
-    print("=" * 65)
 

@@ -336,24 +336,4 @@ def get_signal(symbol: str = "BTCUSDT") -> dict:
         "s1_z_momentum"    : 0.0,
     }
 
-
-# ── Standalone Test ───────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    print("Fetching funding rate data from Binance...")
-    result = get_signal()
-
-    print("\n" + "=" * 65)
-    print("  SIGNAL 1 — FUNDING RATE Z-SCORE  (v2.0 optimized)")
-    print("=" * 65)
-    for k, v in result.items():
-        print(f"  {k:<18} : {v}")
-    print("=" * 65)
-
-    score_map = {+1: "🟢 BULLISH", -1: "🔴 BEARISH", 0: "⚪ NEUTRAL"}
-    print(f"\n  Final Vote      : {score_map[result['s1_score']]}")
-    print(f"  Z-Score         : {result['s1_zscore']}")
-    print(f"  Percentile      : {result['zscore_pctile']}th  "
-          f"(current Z is more extreme than {result['zscore_pctile']}% of history)")
-    print(f"  Persistence OK  : {result['persistence_ok']}")
-    print(f"  Family A        : 1 point "
-          f"{'awarded' if result['s1_score'] != 0 else 'withheld'}")
+

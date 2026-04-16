@@ -12,9 +12,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 PAPER_MODE   = False    # True = paper trade, False = live
-LEVERAGE     = 1        # always 1x during paper phase
-BASE_URL_LIVE = "https://testnet.binancefuture.com"
-BASE_URL_TEST = "https://testnet.binancefuture.com"
+LEVERAGE     = 5        # 5x leverage for demonstration
+BASE_URL     = "https://testnet.binancefuture.com"
 SYMBOL       = "BTCUSDT"
 
 BINANCE_API_KEY    = os.getenv("BINANCE_API_KEY", "")
@@ -35,7 +34,7 @@ class BrokerError(Exception):
 
 class BinanceBroker:
     def __init__(self):
-        self.base_url = BASE_URL_LIVE if not PAPER_MODE else BASE_URL_TEST
+        self.base_url = BASE_URL
         self.api_key = BINANCE_API_KEY
         self.api_secret = BINANCE_API_SECRET
 
@@ -121,59 +120,28 @@ class BinanceBroker:
         return self._request("POST", "/fapi/v1/order", params=params)
 
     def place_limit_order(self, side: str, quantity: float, price: float) -> dict:
-        quantity = round(quantity, 3)
-        price = round(price, 2)
-        if PAPER_MODE:
-            sim_order = {
-                "orderId": int(time.time() * 1000) + 1,
-                "symbol": SYMBOL,
-                "status": "NEW",
-                "clientOrderId": "paper_limit_" + str(int(time.time() * 1000)),
-                "price": str(price),
-                "origQty": str(quantity),
-                "side": side,
-                "type": "LIMIT",
-                "timeInForce": "GTC"
-            }
-            broker_logger.info(f"PAPER: place_limit_order {side} {quantity} at {price}")
-            return sim_order
-            
         params = {
-            "symbol": SYMBOL,
-            "side": side,
-            "type": "LIMIT",
-            "timeInForce": "GTC",
-            "quantity": quantity,
-            "price": price
+            "symbol"      : SYMBOL,
+            "side"        : side,
+            "type"        : "LIMIT",
+            "quantity"    : round(quantity, 3),
+            "price"       : round(price, 2),
+            "timeInForce" : "GTC",
+            "reduceOnly"  : "true",   # must close existing position
         }
-        broker_logger.info(f"Placing LIMIT {side} for {quantity} at {price}")
         return self._request("POST", "/fapi/v1/order", params=params)
 
     def place_stop_order(self, side: str, quantity: float, stop_price: float) -> dict:
-        quantity = round(quantity, 3)
-        stop_price = round(stop_price, 2)
-        if PAPER_MODE:
-            sim_order = {
-                "orderId": int(time.time() * 1000) + 2,
-                "symbol": SYMBOL,
-                "status": "NEW",
-                "clientOrderId": "paper_stop_" + str(int(time.time() * 1000)),
-                "stopPrice": str(stop_price),
-                "origQty": str(quantity),
-                "side": side,
-                "type": "STOP_MARKET"
-            }
-            broker_logger.info(f"PAPER: place_stop_order {side} {quantity} at SL {stop_price}")
-            return sim_order
-
         params = {
-            "symbol": SYMBOL,
-            "side": side,
-            "type": "STOP_MARKET",
-            "quantity": quantity,
-            "stopPrice": stop_price
+            "symbol"      : SYMBOL,
+            "side"        : side,
+            "type"        : "STOP",                 # use STOP not STOP_MARKET
+            "quantity"    : round(quantity, 3),
+            "price"       : round(stop_price, 2),   # required for STOP
+            "stopPrice"   : round(stop_price, 2),
+            "timeInForce" : "GTC",
+            "reduceOnly"  : "true",                 # ensures it closes position
         }
-        broker_logger.info(f"Placing STOP_MARKET {side} for {quantity} at {stop_price}")
         return self._request("POST", "/fapi/v1/order", params=params)
 
     def cancel_order(self, order_id: int) -> dict:

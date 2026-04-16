@@ -1,52 +1,3 @@
-r"""
-import asyncio
-import httpx
-from signal3 import load_history, collect_liquidations, get_signal3
-
-async def main():
-    # Step 1: Load history ONCE at startup
-    load_history()
-
-    # Step 2: Start WebSocket collector as background task
-    asyncio.create_task(collect_liquidations())
-
-    # Step 3: Get your live BTC price (example)
-    async with httpx.AsyncClient() as client:
-        r = await client.get("https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT")
-        current_price = float(r.json()["price"])
-
-    # Step 4: Get signal (call this every 4 hours)
-    result = get_signal3(current_price)
-
-    signal   = result["signal"]    # "BUY" | "SELL" | "HOLD"
-    strength = result["strength"]  # "STRONG" | "MEDIUM" | "WEAK"
-    reason   = result["reason"]
-    features = result["features"]
-
-    print(f"Signal:   {signal}")
-    print(f"Strength: {strength}")
-    print(f"Reason:   {reason}")
-    print(f"Features: {features}")
-
-asyncio.run(main())
-C:\Users\HP\Desktop\HighPrep\Aegis-Quant-System\Aegis-Quant-System\signals\signal3.py
-"""
-
-"""
-{
-    "signal":   "BUY" | "SELL" | "HOLD",
-    "strength": "STRONG" | "MEDIUM" | "WEAK",
-    "reason":   "No setup. Score=0 Dist=0.00% Size=$0 Imbal=0.00",  # example
-    "features": {
-        "s3_nearest_distance": 0.45,   # % distance to nearest cluster
-        "s3_nearest_size":     1200000.0,  # $ size of nearest cluster
-        "s3_nearest_side":     +1,     # +1 = above, -1 = below
-        "s3_cluster_score":    2666.0, # size/distance score
-        "s3_imbalance":        0.35,   # above/below imbalance (-1 to +1)
-        # s3_above_total and s3_below_total are OFF in FEATURES_TO_USE
-    }
-}
-"""
 
 
 import asyncio
@@ -106,7 +57,6 @@ liquidation_history: dict = defaultdict(list)
 def load_history():
     """Load last 7 days of liquidation history from CSV into memory."""
     if not os.path.exists(HISTORY_FILE):
-        print("[Signal 3] No history file found — starting fresh")
         return
 
     cutoff = datetime.now() - timedelta(days=WINDOW_DAYS)
@@ -127,7 +77,6 @@ def load_history():
             except Exception:
                 continue
 
-    print(f"[Signal 3] Loaded {loaded} events from history")
 
 
 def _init_history_file():
@@ -136,7 +85,6 @@ def _init_history_file():
     if not os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "w", newline="") as f:
             csv.writer(f).writerow(["timestamp", "bucket", "notional", "side"])
-        print(f"[Signal 3] Created {HISTORY_FILE}")
 
 
 def _append_to_history(ts: datetime, bucket: int, notional: float, side: str):
@@ -159,7 +107,6 @@ async def collect_liquidations():
     while True:
         try:
             async with websockets.connect(url, ping_interval=180, ping_timeout=10) as ws:
-                print("[Signal 3] WebSocket connected")
                 async for raw in ws:
                     data = json.loads(raw)["o"]
                     if data["s"] != SYMBOL:
@@ -175,7 +122,6 @@ async def collect_liquidations():
                     _append_to_history(ts, bucket, notional, side)
 
         except Exception as e:
-            print(f"[Signal 3] WebSocket error: {e} — reconnecting in 5s")
             await asyncio.sleep(5)
 
 

@@ -35,8 +35,6 @@ class AegisAggregator:
     def __init__(self, mode="LIVE"):
         self.mode = mode
         self.csv_path = os.path.join("data", "processed", "aegis_features.csv")
-        self.signal_cache = {}
-        self.last_update = {}
 
         # ── TTL Cache ──────────────────────────────────────────────────
         # Signals are cached for exactly as long as their underlying
@@ -221,11 +219,13 @@ class AegisAggregator:
             adx_15m = float(dx.rolling(14).mean().iloc[-2]) if len(df) > 28 else 0.0
 
             # Price Returns
-            # -1 is live, -2 is last completed. Use last completed or current? 
-            # Standard is feature on completed candles or live. Using last closed (-2) or current (-1).
-            # I will use current (-1) for live price action and (-2) for prev completed.
+            # -1 is live, -2 is last completed.
             price_15m_return = float((df['close'].iloc[-1] - df['close'].iloc[-2]) / df['close'].iloc[-2] * 100)
             price_1h_return = float((df['close'].iloc[-1] - df['close'].iloc[-5]) / df['close'].iloc[-5] * 100) if len(df) > 5 else 0.0
+
+            # Last closed candle wicks for SL/TP internal detection
+            candle_high = float(df["high"].iloc[-2])
+            candle_low  = float(df["low"].iloc[-2])
 
             # Regime
             if realized_vol_1h > 1.5 * realized_vol_mean_20 and realized_vol_mean_20 > 0:
@@ -246,6 +246,8 @@ class AegisAggregator:
                 "adx_15m": adx_15m,
                 "price_15m_return": price_15m_return,
                 "price_1h_return": price_1h_return,
+                "candle_high": candle_high,
+                "candle_low": candle_low,
                 "regime": regime
             }
 
@@ -254,6 +256,7 @@ class AegisAggregator:
             return {
                 "volatility_15m": 0.0, "volume_15m": 0.0, "atr_15m": 0.0, "realized_vol_1h": 0.0,
                 "trend_strength": 0.0, "adx_15m": 0.0, "price_15m_return": 0.0, "price_1h_return": 0.0,
+                "candle_high": 0.0, "candle_low": 0.0,
                 "regime": 0
             }
 
@@ -384,7 +387,7 @@ def main():
     from aegis.portfolio.constructor import PortfolioManager
 
     broker  = BinanceBroker()
-    paper   = PaperTradeEngine()
+    paper   = PaperTradeEngine(broker=broker)
     manager = PortfolioManager(broker, paper, config=config)
     broker.set_leverage(SYMBOL, LEVERAGE)
 
@@ -408,12 +411,11 @@ def main():
             feature_row = agg.aggregate()
             result      = manager.process(feature_row)
             print(
-                f"  Action:{result['action']:<6} "
-                f"Dir:{str(result['direction']):<5} "
-                f"Score:{result['total_score']:+d} "
-                f"B:{result['family_b_score']:+d} "
-                f"Bulls:{result['bull_votes']} Bears:{result['bear_votes']} "
-                f"→ {result['reason']}"
+                f"  {result['action']:<6} | "
+                f"Dir:{str(result['direction']):<5} | "
+                f"Score:{result['total_score']:+d} B:{result['family_b_score']:+d} | "
+                f"Risk:{result.get('risk_factor', 1.0):.2f}x | "
+                f"{result['reason']}"
             )
             time.sleep(INTERVAL)
 

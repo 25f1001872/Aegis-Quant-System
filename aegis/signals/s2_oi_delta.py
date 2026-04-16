@@ -20,7 +20,9 @@ Integration Points:
 
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, Optional, Tuple
+import requests
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional, Tuple
 import warnings
 
 from aegis.signals.base import BaseSignal
@@ -395,9 +397,7 @@ def get_oi_delta_columns() -> list:
 # ==================== LIVE SIGNAL WRAPPER ====================
 
 def get_signal(symbol: str = "BTCUSDT") -> dict:
-    import requests
-    from datetime import datetime, timezone
-    import pandas as pd
+    # logic changed: NONE
     
     # ── Standardized v1.0 ─────────────────────────────────────────
     # Keys added   : signal_id, score, timestamp, reason, s2_score, s2_oi_delta, s2_oi_current, s2_price_up, s2_oi_up
