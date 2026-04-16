@@ -208,6 +208,5 @@ __marimo__/
 
 
 #
-data.py
-data/
-Quant_summary.pdf.env
+data/raw/
+
