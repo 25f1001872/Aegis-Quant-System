@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from config.risk_params import (
+from configs.risk_params import (
     STARTING_CAPITAL_USD,
     DAILY_LOSS_LIMIT_PCT,
     WEEKLY_LOSS_LIMIT_PCT,

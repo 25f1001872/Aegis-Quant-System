@@ -22,7 +22,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from config.risk_params import (
+from configs.risk_params import (
     OI_COLLAPSE_THRESHOLD,
     FUNDING_REGIME_FLIP,
     SCORE_REDUCTION_THRESHOLD,

@@ -11,9 +11,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-PAPER_MODE   = True     # True = paper trade, False = live
+PAPER_MODE   = False    # True = paper trade, False = live
 LEVERAGE     = 1        # always 1x during paper phase
-BASE_URL_LIVE = "https://fapi.binance.com"
+BASE_URL_LIVE = "https://testnet.binancefuture.com"
 BASE_URL_TEST = "https://testnet.binancefuture.com"
 SYMBOL       = "BTCUSDT"
 

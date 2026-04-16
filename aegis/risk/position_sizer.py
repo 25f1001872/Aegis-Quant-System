@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from config.risk_params import (
+from configs.risk_params import (
     RISK_PER_TRADE,
     MAX_RISK_PER_TRADE_USD,
     SCORE_SIZE_MAP,

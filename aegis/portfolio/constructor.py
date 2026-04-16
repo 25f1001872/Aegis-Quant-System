@@ -1,6 +1,14 @@
 """
 Portfolio manager for Aegis-Quant-System
 """
+
+# ── DEMO MODE ─────────────────────────────────────────────────────
+# True  → forces a trade entry on raw value lean alone
+#          used for demonstration only — bypasses score thresholds
+#          set False for real paper trading
+# False → full production logic — all gates must pass
+DEMO_MODE = True
+
 import os
 import logging
 
@@ -22,6 +30,8 @@ class PortfolioManager:
         self.max_position_pct = float(self.config.get("max_position_pct", 0.20))
         self.last_bull_votes = 0
         self.last_bear_votes = 0
+        self._last_direction   = None   # direction of last decided trade
+        self._direction_count  = 0      # how many consecutive cycles same direction
 
     def can_trade(self, feature_row: dict) -> bool:
         if self.paper_engine.get_position() is not None:
@@ -37,8 +47,9 @@ class PortfolioManager:
         if feature_row.get("regime", 0) == 2:
             return False
             
-        if feature_row.get("family_b_score", 0) == 0:
-            return False
+        if not DEMO_MODE:
+            if feature_row.get("family_b_score", 0) == 0:
+                return False
             
         return True
 
@@ -74,12 +85,27 @@ class PortfolioManager:
         self.last_bull_votes = bull_votes
         self.last_bear_votes = bear_votes
 
-        if bull_votes >= 4 and family_b_score > 0:
-            return "LONG"
-        if bear_votes >= 4 and family_b_score < 0:
+        if DEMO_MODE:
+            # In demo mode use minimum vote threshold
+            # and do not require family_b confirmation
+            # Just go with whichever side has more raw votes
+            # Minimum 3 votes required to avoid 50/50 coin flip
+            if bull_votes >= 3 and bull_votes > bear_votes:
+                return "LONG"
+            if bear_votes >= 3 and bear_votes > bull_votes:
+                return "SHORT"
+            # If tied or neither reaches 3 votes
+            # default to the direction CVD is pointing
+            # CVD is the most reliable raw value signal
+            if s6_cvd > 0:
+                return "LONG"
             return "SHORT"
-            
-        return "NONE"
+        else:
+            if bull_votes >= 4 and family_b_score > 0:
+                return "LONG"
+            if bear_votes >= 4 and family_b_score < 0:
+                return "SHORT"
+            return "NONE"
 
     def compute_levels(self, direction: str, feature_row: dict) -> dict | None:
         try:
@@ -140,6 +166,16 @@ class PortfolioManager:
         }
 
     def compute_size(self, direction: str, entry: float, feature_row: dict) -> float:
+        balance = self.paper_engine.get_balance()
+        if DEMO_MODE:
+            # In demo mode always use 15% of max position
+            # Small size — this is a demonstration not a real trade
+            max_position  = balance * 0.20
+            position_usdt = max_position * 0.15
+            quantity      = round(position_usdt / entry, 3)
+            quantity      = max(quantity, 0.001)
+            return quantity
+
         family_b = abs(feature_row.get("family_b_score", 0))
         total_score = abs(feature_row.get("total_score", 0))
 
@@ -226,6 +262,33 @@ class PortfolioManager:
                 if direction == "NONE":
                     reason = "Not enough clear directional votes"
                 else:
+                    # ── Direction stability check ──────────────────────────────────────
+                    # Require the same direction for 2 consecutive 310s cycles
+                    # before opening a trade in DEMO_MODE
+                    # Prevents opening on a single-cycle signal that immediately flips
+                    if DEMO_MODE:
+                        if direction == self._last_direction:
+                            self._direction_count += 1
+                        else:
+                            self._last_direction  = direction
+                            self._direction_count = 1
+                            return {
+                                "action"        : "SKIP",
+                                "direction"     : direction,
+                                "total_score"   : feature_row.get("total_score", 0),
+                                "family_b_score": feature_row.get("family_b_score", 0),
+                                "bull_votes"    : self.last_bull_votes,
+                                "bear_votes"    : self.last_bear_votes,
+                                "entry_price"   : None,
+                                "sl_price"      : None,
+                                "tp1_price"     : None,
+                                "quantity"      : None,
+                                "reason"        : f"DEMO: {direction} direction seen once — waiting for confirmation next cycle"
+                            }
+                        # Direction confirmed for 2 cycles — proceed to open
+                        self._direction_count = 0
+                        self._last_direction  = None
+
                     levels = self.compute_levels(direction, feature_row)
                     if not levels:
                         reason = "SL out of bounds or levels uncomputable"
